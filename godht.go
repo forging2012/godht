@@ -306,10 +306,8 @@ func (g *godht) send(dict map[string]interface{}, to *net.UDPAddr) error {
 }
 
 func (g *godht) join() {
-	for range time.Tick(3 * time.Second) {
-		for _, boot := range BootstrapNodes {
-			g.findNode(boot, randBytes(20))
-		}
+	for _, boot := range BootstrapNodes {
+		g.findNode(boot, randBytes(20))
 	}
 }
 
