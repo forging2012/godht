@@ -2,14 +2,18 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha1"
 	"encoding/binary"
-	"errors"
+	"encoding/hex"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"time"
+
+	"golang.org/x/time/rate"
 
 	"github.com/fanpei91/bencode"
 )
@@ -23,8 +27,6 @@ var BootstrapNodes = []string{
 	"dht.transmissionbt.com:6881",
 	"router.utorrent.com:6881",
 }
-
-var invalidMessage = errors.New("invalid bencode message.")
 
 type nodeID []byte
 type node struct {
@@ -94,25 +96,31 @@ func decodeNodes(s string) (nodes []*node) {
 	return
 }
 
-type godht struct {
-	announce   chan *announce
-	node       chan *node
-	localID    nodeID
-	conn       *net.UDPConn
-	queryTypes map[string]func(map[string]interface{}, *net.UDPAddr)
+func per(events int, duration time.Duration) rate.Limit {
+	return rate.Every(duration / time.Duration(events))
 }
 
-func newDHT(laddr string) (*godht, error) {
+type godht struct {
+	announce       chan *announce
+	node           chan *node
+	localID        nodeID
+	conn           *net.UDPConn
+	queryTypes     map[string]func(map[string]interface{}, *net.UDPAddr)
+	friendsLimiter *rate.Limiter
+}
+
+func newDHT(laddr string, maxFriendsPerSec int) (*godht, error) {
 	conn, err := net.ListenPacket("udp4", laddr)
 	if err != nil {
 		return nil, err
 	}
 	localID := randBytes(20)
 	g := &godht{
-		localID:  localID,
-		announce: make(chan *announce, 10),
-		conn:     conn.(*net.UDPConn),
-		node:     make(chan *node, 60),
+		localID:        localID,
+		announce:       make(chan *announce),
+		conn:           conn.(*net.UDPConn),
+		node:           make(chan *node),
+		friendsLimiter: rate.NewLimiter(per(maxFriendsPerSec, time.Second), maxFriendsPerSec),
 	}
 	g.queryTypes = map[string]func(map[string]interface{}, *net.UDPAddr){
 		"ping":          g.onPingQuery,
@@ -306,21 +314,34 @@ func (g *godht) join() {
 }
 
 func (g *godht) makefriends() {
-	for node := range g.node {
+	for {
+		if err := g.friendsLimiter.Wait(context.Background()); err != nil {
+			continue
+		}
+		node := <-g.node
 		g.findNode(node.addr, []byte(node.id))
 	}
 }
 
+func magnetLink(announce map[string]interface{}) string {
+	if a, ok := announce["a"].(map[string]interface{}); ok {
+		infohash := a["info_hash"].(string)
+		return fmt.Sprintf("magnet:?xt=urn:btih:%v", hex.EncodeToString([]byte(infohash)))
+	}
+	return ""
+}
+
 func main() {
-	dht, err := newDHT("0.0.0.0:6311")
+	laddr, maxFriendsPerSec := os.Args[1], os.Args[2]
+	max, err := strconv.Atoi(maxFriendsPerSec)
+	if err != nil {
+		panic(err)
+	}
+	dht, err := newDHT(laddr, max)
 	if err != nil {
 		panic(err)
 	}
 	for announce := range dht.announce {
-		if a, ok := announce.announce["a"].(map[string]interface{}); ok {
-			if name, ok := a["name"].(string); ok {
-				fmt.Printf("%s\n%s\n\n", announce.from.String(), name)
-			}
-		}
+		fmt.Println(magnetLink(announce.announce))
 	}
 }
