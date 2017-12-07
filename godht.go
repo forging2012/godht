@@ -323,8 +323,9 @@ func (g *godht) makefriends() {
 
 func magnetLink(announce map[string]interface{}) string {
 	if a, ok := announce["a"].(map[string]interface{}); ok {
-		infohash := a["info_hash"].(string)
-		return fmt.Sprintf("magnet:?xt=urn:btih:%v", hex.EncodeToString([]byte(infohash)))
+		if infohash, ok := a["info_hash"].(string); ok {
+			return fmt.Sprintf("magnet:?xt=urn:btih:%v", hex.EncodeToString([]byte(infohash)))
+		}
 	}
 	return ""
 }
