@@ -8,16 +8,80 @@ go get github.com/fanpei91/godht
 ```
 
 ## Usage
-```bash
-godht [listening address] [max friends to make with per second]
+```go
+package main
+
+import (
+	"fmt"
+
+	"github.com/fanpei91/godht"
+)
+
+func main() {
+	laddr, maxFriendsPerSec := "0.0.0.0:6881", 400
+	dht, err := godht.New(laddr, godht.MaxFriendsPerSec(maxFriendsPerSec))
+	if err != nil {
+		panic(err)
+	}
+	for announce := range dht.Announce {
+		fmt.Println(fmt.Sprintf("link: magnet:?xt=urn:btih:%v\nnode: %s\npeer: %s\n",
+			announce.InfohashHex,
+			announce.From.String(),
+			announce.Peer.String(),
+		))
+	}
+}
 ```
 
-## Example
-```bash
-godht 0.0.0.0:6881 500
+## API
+#### func  Bootstraps
+
+```go
+func Bootstraps(addr []string) option
 ```
 
-## Output
+#### func  LocalID
 
-After start, wait a few minutes, the program will output magnet links.
+```go
+func LocalID(id []byte) option
+```
 
+#### func  MaxFriendsPerSec
+
+```go
+func MaxFriendsPerSec(n int) option
+```
+
+#### func  Secret
+
+```go
+func Secret(s string) option
+```
+
+#### type Announce
+
+```go
+type Announce struct {
+	Raw         map[string]interface{}
+	From        *net.UDPAddr
+	Peer        *net.TCPAddr
+	Infohash    []byte
+	InfohashHex string
+}
+```
+
+
+#### type GoDHT
+
+```go
+type GoDHT struct {
+	Announce chan *Announce
+}
+```
+
+
+#### func  New
+
+```go
+func New(laddr string, options ...option) (*GoDHT, error)
+```
