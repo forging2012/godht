@@ -1,6 +1,6 @@
 # godht
 
-A very simple DHT crawler in Golang.
+A very simple and fast DHT crawler in Golang.
 
 ## Install
 ```bash
