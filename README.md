@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	laddr, maxFriendsPerSec := "0.0.0.0:6881", 400
+	laddr, maxFriendsPerSec := "0.0.0.0:6331", 500
 	dht, err := godht.New(laddr, godht.MaxFriendsPerSec(maxFriendsPerSec))
 	if err != nil {
 		panic(err)
@@ -32,8 +32,8 @@ func main() {
 	}
 }
 ```
-
 ## API
+
 #### func  Bootstraps
 
 ```go

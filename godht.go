@@ -2,7 +2,6 @@ package godht
 
 import (
 	"bytes"
-	"context"
 	"crypto/rand"
 	"crypto/sha1"
 	"encoding/binary"
@@ -145,8 +144,6 @@ func New(laddr string, options ...option) (*GoDHT, error) {
 	g.friendsLimiter = rate.NewLimiter(per(g.maxFriendsPerSec, time.Second), g.maxFriendsPerSec)
 	g.Announce = make(chan *Announce, g.announceMaxCache)
 	g.queryTypes = map[string]func(map[string]interface{}, *net.UDPAddr){
-		"ping":          g.onPingQuery,
-		"find_node":     g.onFindNodeQuery,
 		"get_peers":     g.onGetPeersQuery,
 		"announce_peer": g.onAnnouncePeerQuery,
 	}
@@ -167,20 +164,9 @@ func (g *GoDHT) listen() error {
 }
 
 func (g *GoDHT) join() {
-	for _, boot := range g.bootstraps {
-		g.findNode(boot, randBytes(20))
+	for _, addr := range g.bootstraps {
+		g.node <- &node{addr: addr, id: string(randBytes(20))}
 	}
-}
-
-func (g *GoDHT) error(tid string, to *net.UDPAddr) {
-	e := map[string]interface{}{
-		"t": tid,
-		"y": "e",
-		"e": []interface{}{
-			203, "Protocol Error Ocurred",
-		},
-	}
-	g.send(e, to)
 }
 
 func (g *GoDHT) onMessage(data []byte, from *net.UDPAddr) {
@@ -188,14 +174,8 @@ func (g *GoDHT) onMessage(data []byte, from *net.UDPAddr) {
 	if err != nil {
 		return
 	}
-	tid, ok := dict["t"].(string)
-	if !ok {
-		g.error(tid, from)
-		return
-	}
 	y, ok := dict["y"].(string)
 	if !ok {
-		g.error(tid, from)
 		return
 	}
 	switch y {
@@ -207,13 +187,12 @@ func (g *GoDHT) onMessage(data []byte, from *net.UDPAddr) {
 }
 
 func (g *GoDHT) onQuery(dict map[string]interface{}, from *net.UDPAddr) {
-	tid, ok := dict["t"].(string)
+	_, ok := dict["t"].(string)
 	if !ok {
 		return
 	}
 	q, ok := dict["q"].(string)
 	if !ok {
-		g.error(tid, from)
 		return
 	}
 	if f, ok := g.queryTypes[q]; ok {
@@ -234,15 +213,14 @@ func (g *GoDHT) onReply(dict map[string]interface{}, from *net.UDPAddr) {
 		if !g.friendsLimiter.Allow() {
 			continue
 		}
-		g.friendsLimiter.Wait(context.Background())
 		g.node <- node
 	}
 }
 
 func (g *GoDHT) findNode(to string, target nodeID) {
-	d := makeQuery(string(randBytes(4)), "find_node", map[string]interface{}{
+	d := makeQuery(string(randBytes(2)), "find_node", map[string]interface{}{
 		"id":     string(neighborID(target, g.localID)),
-		"target": string(target),
+		"target": string(randBytes(20)),
 	})
 	addr, err := net.ResolveUDPAddr("udp4", to)
 	if err != nil {
@@ -251,53 +229,14 @@ func (g *GoDHT) findNode(to string, target nodeID) {
 	g.send(d, addr)
 }
 
-func (g *GoDHT) onPingQuery(dict map[string]interface{}, from *net.UDPAddr) {
-	t := dict["t"].(string)
-	a, ok := dict["a"].(map[string]interface{})
-	if !ok {
-		g.error(t, from)
-		return
-	}
-	id, ok := a["id"].(string)
-	if !ok {
-		g.error(t, from)
-		return
-	}
-	d := makeReply(t, map[string]interface{}{
-		"id": string(neighborID([]byte(id), g.localID)),
-	})
-	g.send(d, from)
-}
-
-func (g *GoDHT) onFindNodeQuery(dict map[string]interface{}, from *net.UDPAddr) {
-	t := dict["t"].(string)
-	a, ok := dict["a"].(map[string]interface{})
-	if !ok {
-		g.error(t, from)
-		return
-	}
-	id, ok := a["id"].(string)
-	if !ok {
-		g.error(t, from)
-		return
-	}
-	d := makeReply(t, map[string]interface{}{
-		"id":    string(neighborID([]byte(id), g.localID)),
-		"nodes": "",
-	})
-	g.send(d, from)
-}
-
 func (g *GoDHT) onGetPeersQuery(dict map[string]interface{}, from *net.UDPAddr) {
 	t := dict["t"].(string)
 	a, ok := dict["a"].(map[string]interface{})
 	if !ok {
-		g.error(t, from)
 		return
 	}
 	id, ok := a["id"].(string)
 	if !ok {
-		g.error(t, from)
 		return
 	}
 	d := makeReply(t, map[string]interface{}{
@@ -309,26 +248,14 @@ func (g *GoDHT) onGetPeersQuery(dict map[string]interface{}, from *net.UDPAddr) 
 }
 
 func (g *GoDHT) onAnnouncePeerQuery(dict map[string]interface{}, from *net.UDPAddr) {
-	t := dict["t"].(string)
 	a, ok := dict["a"].(map[string]interface{})
 	if !ok {
-		g.error(t, from)
-		return
-	}
-	id, ok := a["id"].(string)
-	if !ok {
-		g.error(t, from)
 		return
 	}
 	token, ok := a["token"].(string)
 	if !ok || !g.validateToken(token, from) {
-		g.error(t, from)
 		return
 	}
-	d := makeReply(t, map[string]interface{}{
-		"id": string(neighborID([]byte(id), g.localID)),
-	})
-	g.send(d, from)
 	if len(g.Announce) == g.announceMaxCache {
 		return
 	}
